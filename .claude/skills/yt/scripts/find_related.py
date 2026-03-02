@@ -83,6 +83,7 @@ def parse_note(path: Path, vault_path: Path) -> dict | None:
         "frontmatter": dict(post.metadata),
         "tags": all_tags,
         "wikilinks": wikilinks,
+        "link_stems": {link.split("/")[-1].lower() for link in wikilinks},
     }
 
 
@@ -109,10 +110,11 @@ def main():
         return
 
     source_tags = set(source["tags"])
-    source_links = {link.split("/")[-1].lower() for link in source["wikilinks"]}
+    source_link_stems = source["link_stems"]
     source_stem = resolved.stem.lower()
+    src_type = source["frontmatter"].get("type")
 
-    related = {}
+    related = []
 
     for p in scan_vault(vault_path):
         if p == resolved:
@@ -121,16 +123,14 @@ def main():
         if note is None:
             continue
 
-        rel_path = note["path"]
         score = 0
         reasons = []
 
-        note_link_targets = {link.split("/")[-1].lower() for link in note.get("wikilinks", [])}
-        if source_stem in note_link_targets:
+        if source_stem in note["link_stems"]:
             score += 3
             reasons.append("backlink")
 
-        if p.stem.lower() in source_links:
+        if p.stem.lower() in source_link_stems:
             score += 2
             reasons.append("outgoing_link")
 
@@ -140,16 +140,15 @@ def main():
             score += len(shared)
             reasons.append(f"shared_tags: {sorted(shared)}")
 
-        src_type = source["frontmatter"].get("type")
         note_type = note["frontmatter"].get("type")
         if src_type and src_type == note_type:
             score += 1
             reasons.append("same_type")
 
         if score > 0:
-            related[rel_path] = {"path": rel_path, "score": score, "reasons": reasons}
+            related.append({"path": note["path"], "score": score, "reasons": reasons})
 
-    sorted_related = sorted(related.values(), key=lambda x: x["score"], reverse=True)
+    sorted_related = sorted(related, key=lambda x: x["score"], reverse=True)
     result = {
         "source": remaining[0],
         "total_related": len(sorted_related),

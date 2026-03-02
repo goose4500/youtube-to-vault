@@ -45,7 +45,8 @@ def get_vault_path(args: list[str]) -> Path:
 
 def main():
     vault_path = get_vault_path(sys.argv[1:])
-    tag_index = {}
+    tag_counts: dict[str, int] = {}
+    tag_examples: dict[str, list[str]] = {}
 
     for p in sorted(vault_path.rglob("*.md")):
         if ".obsidian" in p.parts:
@@ -64,16 +65,18 @@ def main():
 
         rel = str(p.relative_to(vault_path))
         for tag in all_tags:
-            if tag not in tag_index:
-                tag_index[tag] = []
-            tag_index[tag].append(rel)
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+            if tag not in tag_examples:
+                tag_examples[tag] = []
+            if len(tag_examples[tag]) < 3:
+                tag_examples[tag].append(rel)
 
-    sorted_tags = sorted(tag_index.items(), key=lambda x: len(x[1]), reverse=True)
+    sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
     result = {
         "total_unique_tags": len(sorted_tags),
         "tags": [
-            {"tag": tag, "count": len(paths), "example_notes": paths[:3]}
-            for tag, paths in sorted_tags
+            {"tag": tag, "count": count, "example_notes": tag_examples.get(tag, [])}
+            for tag, count in sorted_tags
         ],
     }
 

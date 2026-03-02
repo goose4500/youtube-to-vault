@@ -110,25 +110,23 @@ def parse_note(path: Path, vault_path: Path) -> dict | None:
         "frontmatter": dict(post.metadata),
         "tags": all_tags,
         "wikilinks": wikilinks,
+        "link_stems": {link.split("/")[-1].lower() for link in wikilinks},
         "content": raw,
     }
 
 
-def score_relatedness(source: dict, candidate: dict, source_path: Path, candidate_path: Path) -> tuple[int, list[str]]:
+def score_relatedness(source: dict, candidate: dict) -> tuple[int, list[str]]:
     score = 0
     reasons = []
 
-    source_stem = source_path.stem.lower()
-    candidate_stem = candidate_path.stem.lower()
+    source_stem = Path(source["path"]).stem.lower()
+    candidate_stem = Path(candidate["path"]).stem.lower()
 
-    source_links = {link.split("/")[-1].lower() for link in source.get("wikilinks", [])}
-    candidate_links = {link.split("/")[-1].lower() for link in candidate.get("wikilinks", [])}
-
-    if source_stem in candidate_links:
+    if source_stem in candidate.get("link_stems", set()):
         score += 3
         reasons.append("backlink")
 
-    if candidate_stem in source_links:
+    if candidate_stem in source.get("link_stems", set()):
         score += 2
         reasons.append("outgoing_link")
 
@@ -148,35 +146,17 @@ def score_relatedness(source: dict, candidate: dict, source_path: Path, candidat
     return score, reasons
 
 
-def existing_wikilinks_in_section(content: str, section_match: re.Match) -> set[str]:
-    """Extract existing wikilinks from a Related/See Also section."""
-    start = section_match.end()
-    next_heading = re.search(r"^## ", content[start:], re.MULTILINE)
-    end = start + next_heading.start() if next_heading else len(content)
-    section_text = content[start:end]
-    return {link.lower() for link in WIKILINK_RE.findall(section_text)}
-
-
 def inject_links_into_note(note_path: Path, links_to_add: list[str], dry_run: bool) -> list[str]:
     """Inject wikilinks into a note's Related Notes section. Returns list of actually injected links."""
     content = note_path.read_text(encoding="utf-8-sig")
 
-    # Find existing related section
-    match = RELATED_SECTION_RE.search(content)
-
-    # Deduplicate against existing links in section
-    existing = set()
-    if match:
-        existing = existing_wikilinks_in_section(content, match)
-
-    # Also check whole-document wikilinks to avoid redundancy
+    # Deduplicate against all wikilinks in the document
     all_existing = {link.split("/")[-1].lower() for link in WIKILINK_RE.findall(content)}
 
     injected = []
     new_links_block = ""
     for link in links_to_add:
-        stem = link.lower()
-        if stem not in existing and stem not in all_existing:
+        if link.lower() not in all_existing:
             new_links_block += f"- [[{link}]]\n"
             injected.append(link)
 
@@ -186,16 +166,16 @@ def inject_links_into_note(note_path: Path, links_to_add: list[str], dry_run: bo
     if dry_run:
         return injected
 
-    if match:
-        # Insert after the section heading
-        insert_pos = match.end()
-        # Find where current section content starts (skip blank lines)
+    section_match = RELATED_SECTION_RE.search(content)
+    if section_match:
+        insert_pos = section_match.end()
         remaining = content[insert_pos:]
         leading_newlines = len(remaining) - len(remaining.lstrip("\n"))
         insert_pos += leading_newlines
-        content = content[:insert_pos] + "\n" + new_links_block + content[insert_pos:]
+        if not remaining[leading_newlines:leading_newlines + 1] == "\n":
+            new_links_block = "\n" + new_links_block
+        content = content[:insert_pos] + new_links_block + content[insert_pos:]
     else:
-        # Append a new Related Notes section
         content = content.rstrip("\n") + "\n\n## Related Notes\n\n" + new_links_block
 
     note_path.write_text(content, encoding="utf-8")
@@ -216,7 +196,13 @@ def main():
     dry_run = args["dry_run"]
     do_incoming = args["incoming"]
 
-    all_vault_notes = scan_vault(vault_path)
+    # Parse entire vault once upfront
+    vault_index: dict[Path, dict] = {}
+    for p in scan_vault(vault_path):
+        note = parse_note(p, vault_path)
+        if note is not None:
+            vault_index[p] = note
+
     report = {
         "outgoing_injected": [],
         "incoming_candidates": [],
@@ -229,7 +215,9 @@ def main():
         if not new_note_path.suffix:
             new_note_path = new_note_path.with_suffix(".md")
 
-        new_note = parse_note(new_note_path, vault_path)
+        new_note = vault_index.get(new_note_path)
+        if new_note is None:
+            new_note = parse_note(new_note_path, vault_path)
         if new_note is None:
             report["outgoing_injected"].append({
                 "note": new_note_rel,
@@ -239,17 +227,14 @@ def main():
 
         # Score against all vault notes
         scored = []
-        for p in all_vault_notes:
+        for p, candidate in vault_index.items():
             if p == new_note_path:
                 continue
-            candidate = parse_note(p, vault_path)
-            if candidate is None:
-                continue
 
-            score, reasons = score_relatedness(new_note, candidate, new_note_path, p)
+            score, reasons = score_relatedness(new_note, candidate)
             if score >= min_score:
                 scored.append({
-                    "path": str(p.relative_to(vault_path)),
+                    "path": candidate["path"],
                     "stem": p.stem,
                     "score": score,
                     "reasons": reasons,
@@ -258,7 +243,7 @@ def main():
         scored.sort(key=lambda x: x["score"], reverse=True)
         top = scored[:max_per_note]
 
-        # Outgoing: inject links from new note → existing notes
+        # Outgoing: inject links from new note -> existing notes
         links_to_add = [s["stem"] for s in top]
         injected = inject_links_into_note(new_note_path, links_to_add, dry_run)
 
@@ -270,23 +255,21 @@ def main():
         })
         report["skipped_duplicates"] += len(links_to_add) - len(injected)
 
-        # Incoming: inject links from existing notes → new note
+        # Incoming: inject links from existing notes -> new note
         if do_incoming:
-            for match in top:
-                existing_path = vault_path / match["path"]
-                existing_note = parse_note(existing_path, vault_path)
+            for entry in top:
+                existing_path = vault_path / entry["path"]
+                existing_note = vault_index.get(existing_path)
                 if existing_note is None:
                     continue
 
-                reverse_score, reverse_reasons = score_relatedness(
-                    existing_note, new_note, existing_path, new_note_path
-                )
+                reverse_score, reverse_reasons = score_relatedness(existing_note, new_note)
                 if reverse_score >= min_score:
                     incoming_injected = inject_links_into_note(
                         existing_path, [new_note_path.stem], dry_run
                     )
                     report["incoming_candidates"].append({
-                        "existing_note": match["path"],
+                        "existing_note": entry["path"],
                         "new_note": new_note_rel,
                         "score": reverse_score,
                         "reasons": reverse_reasons,

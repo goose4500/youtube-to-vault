@@ -32,7 +32,6 @@ import frontmatter
 WIKILINK_RE = re.compile(r"(?<!!)\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 MD_LINK_RE = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)]+)\)")
 TAG_RE = re.compile(r"(?:^|\s)#([a-zA-Z][a-zA-Z0-9_/-]+)", re.MULTILINE)
-DAILY_NOTE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
 DAILY_FORMAT_PATTERNS = {
     r"^\d{4}-\d{2}-\d{2}\.md$": "YYYY-MM-DD",
     r"^\d{4}_\d{2}_\d{2}\.md$": "YYYY_MM_DD",
@@ -48,12 +47,10 @@ def scan_notes(vault_path: Path) -> list[Path]:
     ]
 
 
-def detect_daily_notes(vault_path: Path) -> dict | None:
+def detect_daily_notes(vault_path: Path, notes: list[Path]) -> dict | None:
     """Find folder containing daily notes by date-format filenames."""
     candidates = {}
-    for p in vault_path.rglob("*.md"):
-        if ".obsidian" in p.parts:
-            continue
+    for p in notes:
         for pattern, fmt in DAILY_FORMAT_PATTERNS.items():
             if re.match(pattern, p.name):
                 folder = str(p.parent.relative_to(vault_path))
@@ -212,7 +209,7 @@ def main():
             "markdown_links": mdlink_count,
             "wikilink_percentage": wiki_pct,
         },
-        "daily_notes": detect_daily_notes(vault_path),
+        "daily_notes": detect_daily_notes(vault_path, notes),
         "templates": detect_templates(vault_path),
         "folder_type_mapping": folder_type_map,
     }
