@@ -1,0 +1,43 @@
+# youtube-to-vault configuration
+# Copy this to config.yaml and edit to match your setup.
+# Run: cp config.yaml.example config.yaml
+
+# REQUIRED: Absolute path to your Obsidian vault
+vault_path: "/path/to/your/obsidian-vault"
+
+# Where new notes are written (relative to vault root, empty = vault root)
+output_folder: ""
+
+# Optional: Route notes to specific folders by domain keyword
+# The skill uses these hints when deciding where to place notes.
+# folder_routing:
+#   ai: "AI/"
+#   programming: "Dev/"
+#   business: "Business/"
+
+# Daily notes configuration (optional)
+# daily_notes:
+#   folder: "Daily"           # Folder containing daily notes
+#   date_format: "YYYY-MM-DD" # Filename format
+#   insight_section: "## Insights"  # Section header to append under
+
+# Frontmatter defaults applied to every new note
+frontmatter:
+  type: "reference"              # Default type value
+  default_tags:                  # Tags added to every note
+    - "youtube-import"
+  include_source_url: true       # Add source: field with YouTube URL
+  include_created: true          # Add created: field with today's date
+  include_updated: true          # Add updated: field with today's date
+
+# Backlink injection settings
+backlinks:
+  auto_inject_outgoing: true     # Automatically add links from new notes → related existing notes
+  prompt_before_incoming: true   # Ask before modifying existing notes to link back to new notes
+  min_score: 3                   # Minimum relatedness score to inject a link
+  max_suggestions: 10            # Max related notes to link per new note
+
+# Excalidraw diagram generation (requires excalidraw MCP server)
+diagrams:
+  enabled: false                 # Set true if you have excalidraw MCP configured
+  output_folder: "_media/excalidraw"  # Where to save .excalidraw files

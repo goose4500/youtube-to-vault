@@ -1,0 +1,5 @@
+config.yaml
+vault-profile.json
+__pycache__/
+*.pyc
+.DS_Store
